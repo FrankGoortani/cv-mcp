@@ -1,4 +1,4 @@
-// A simplified MCP Server implementation for Cloudflare Workers
+// A robust MCP Server implementation for Cloudflare Workers
 
 export interface Env {
   ENVIRONMENT: string;
@@ -9,13 +9,12 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-// Main handler for all requests
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
       const url = new URL(request.url);
 
-      // CORS preflight request handler
+      // Handle CORS preflight
       if (request.method === "OPTIONS") {
         return new Response(null, {
           status: 204,
@@ -39,65 +38,41 @@ export default {
         });
       }
 
-      // SSE endpoint
+      // SSE endpoint - using a more reliable pattern
       if (url.pathname === "/sse") {
-        // A simple SSE response with static data - more reliable approach
+        // Check if this is a proxy request (MCP Inspector)
+        // Will have a URL param like transportType=sse
+        const transportType = url.searchParams.get('transportType');
+        const proxyUrl = url.searchParams.get('url');
+
+        console.log(`SSE request: transportType=${transportType}, proxyUrl=${proxyUrl}`);
+
+        // Set up headers for SSE
         const headers = new Headers({
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "no-cache, no-transform",
           "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no", // For Nginx
+          "Access-Control-Allow-Origin": "*"
         });
 
-        // Instead of using TransformStream, create a ReadableStream directly
+        // Convert our async generator to a ReadableStream that Response can handle
         const stream = new ReadableStream({
-          start(controller) {
+          async start(controller) {
             const encoder = new TextEncoder();
 
-            // Helper function to send an event
-            function send(event: string, data: Record<string, any>) {
-              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            try {
+              // Process all the values from the async generator
+              for await (const chunk of sseStream(ctx)) {
+                // Encode text to Uint8Array and enqueue
+                controller.enqueue(encoder.encode(chunk));
+              }
+            } catch (error) {
+              console.error("Stream error:", error);
+            } finally {
+              // Always close the controller when done
+              controller.close();
             }
-
-            // Send initial connected event
-            send("connected", { status: "connected" });
-
-            // Send server_info event
-            send("server_info", {
-              name: "CV MCP Worker",
-              version: "1.0.0",
-              description: "Cloudflare Worker MCP Server",
-              status: "connected",
-              tools: [
-                {
-                  name: "hello",
-                  description: "Says hello",
-                  input_schema: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" }
-                    }
-                  }
-                }
-              ],
-              resources: []
-            });
-
-            // Set up heartbeat interval
-            const heartbeatInterval = setInterval(() => {
-              send("heartbeat", {
-                timestamp: new Date().toISOString(),
-                status: "ok"
-              });
-            }, 5000);
-
-            // Handle stream closing
-            ctx.waitUntil(
-              new Promise((resolve) => {
-                // Return a dummy promise that never resolves
-                // This keeps the stream open until the client disconnects
-              })
-            );
           }
         });
 
@@ -124,7 +99,7 @@ export default {
         }
 
         try {
-          // Parse the request body
+          // Parse request body
           const body = await request.json();
 
           // Extract tool name
@@ -139,7 +114,7 @@ export default {
             toolArgs = body.arguments || {};
           }
 
-          // Simple tool implementation
+          // Implement basic hello tool
           if (toolName === "hello") {
             const name = toolArgs.name || "World";
             return new Response(JSON.stringify({
@@ -148,7 +123,7 @@ export default {
             }), { headers });
           }
 
-          // Unknown tool
+          // Unknown tool response
           return new Response(JSON.stringify({
             status: "error",
             message: `Unknown tool: ${toolName}`
@@ -168,7 +143,7 @@ export default {
         }
       }
 
-      // Default 404 for unmatched routes
+      // Default 404 handler
       return new Response(JSON.stringify({
         status: "not_found",
         message: `Endpoint not found: ${url.pathname}`
@@ -178,7 +153,7 @@ export default {
       });
 
     } catch (error) {
-      // Catch-all error handler
+      // Global error handler
       return new Response(JSON.stringify({
         status: "error",
         message: error instanceof Error ? error.message : "Unknown error"
@@ -189,3 +164,64 @@ export default {
     }
   }
 };
+
+// SSE async generator - a more robust approach for Cloudflare Workers
+async function* sseStream(ctx: ExecutionContext): AsyncIterableIterator<string> {
+  const encoder = new TextEncoder();
+
+  // Helper function to create a properly formatted SSE message
+  function formatSSE(event: string, data: any): string {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  }
+
+  try {
+    // Initial connection message - immediately yield
+    yield formatSSE("connected", { status: "connected" });
+
+    // Server info message - define our MCP server capabilities
+    yield formatSSE("server_info", {
+      name: "CV MCP Worker",
+      version: "1.0.0",
+      description: "Cloudflare Worker MCP Server",
+      status: "connected",
+      tools: [
+        {
+          name: "hello",
+          description: "Says hello",
+          input_schema: {
+            type: "object",
+            properties: {
+              name: { type: "string" }
+            }
+          }
+        }
+      ],
+      resources: []
+    });
+
+    // Set up heartbeat intervals using async sleep
+    let counter = 0;
+    const MAX_HEARTBEATS = 500; // Safety limit
+
+    // Keep the connection alive with heartbeats
+    while (counter < MAX_HEARTBEATS) {
+      // Wait 5 seconds
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Send heartbeat
+      yield formatSSE("heartbeat", {
+        timestamp: new Date().toISOString(),
+        status: "ok",
+        counter: counter + 1
+      });
+
+      counter++;
+    }
+  } catch (error) {
+    console.error("SSE stream error:", error);
+    // If we encounter an error, send a final error message
+    yield formatSSE("error", {
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+}
