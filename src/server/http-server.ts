@@ -1,3 +1,21 @@
+// Patch the global scope to handle node:sqlite issue
+// This needs to be at the top of the file to ensure it applies before any imports
+if (typeof globalThis.require === 'undefined') {
+  // In Cloudflare Workers environment, add a mock require function
+  // that returns empty objects for node: modules
+  // Use 'as any' to bypass TypeScript type checking for the global require function
+  (globalThis as any).require = function mockRequire(moduleName: string) {
+    if (moduleName === 'node:sqlite') {
+      return { DatabaseSync: class {} };
+    }
+    // For other node: modules, return empty objects
+    if (moduleName.startsWith('node:')) {
+      return {};
+    }
+    throw new Error(`Cannot find module '${moduleName}'`);
+  };
+}
+
 // Import dependencies wrapped in try/catch to handle potential issues in Workers environment
 let startServer: any;
 let importError: Error | null = null;

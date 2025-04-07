@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+// Use ES modules syntax since package.json has "type": "module"
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
+
+// Get the directory name in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // First, run the normal build
 console.log('Running initial build...');
@@ -9,8 +15,9 @@ execSync('bun build src/server/http-server.ts --outdir build --target browser --
   stdio: 'inherit'
 });
 
-// Path to the built file
-const workerFile = path.join(process.cwd(), 'build', 'http-server.js');
+// Path to the built file - using path.resolve for proper path resolution
+const projectRoot = path.resolve(__dirname, '..');
+const workerFile = path.join(projectRoot, 'build', 'http-server.js');
 
 console.log('Patching node:sqlite and other Node.js dependencies...');
 
