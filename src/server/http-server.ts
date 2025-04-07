@@ -79,88 +79,85 @@ async function handleSSE(request: Request, ctx?: any) {
     'Access-Control-Allow-Headers': '*'
   });
 
-  // Create a ReadableStream for more reliable SSE in Workers
-  const stream = new ReadableStream({
-    start(controller) {
-      const encoder = new TextEncoder();
+  // Create a simple response with pre-generated SSE data
+  // This is a more reliable approach for Cloudflare Workers
+  const encoder = new TextEncoder();
 
-      // Helper to send SSE events
-      function sendEvent(eventName: string, data: any) {
-        const event = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(encoder.encode(event));
-        console.log(`Sent event: ${eventName}`);
-      }
+  // Pre-generate the initial events
+  const initialEvents = [
+    `event: connected\ndata: ${JSON.stringify({ status: "connected" })}\n\n`,
+    `event: server_info\ndata: ${JSON.stringify({
+      name: "CV MCP Worker",
+      version: "1.0.0",
+      description: "Cloudflare Worker MCP Server",
+      status: "connected",
+      tools: [
+        {
+          name: "hello",
+          description: "Says hello",
+          input_schema: {
+            type: "object",
+            properties: { name: { type: "string" } }
+          }
+        }
+      ],
+      resources: []
+    })}\n\n`
+  ].join('');
 
-      // Send immediate connected event
-      sendEvent("connected", { status: "connected" });
+  // Create a transformer that will add heartbeats
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
 
-      // Initialize server in background if possible
-      let serverInfo: any = {
-        name: "CV MCP Worker",
-        version: "1.0.0",
-        description: "Cloudflare Worker MCP Server",
-        status: "connected"
-      };
+  // Write the initial events immediately
+  writer.write(encoder.encode(initialEvents));
 
-      // Try to initialize MCP server and get real tools/resources
-      (async () => {
-        try {
-          const server = await ensureServerInitialized();
-          if (server) {
-            // Get actual server info if available
-            const tools = server.getTools ? server.getTools() : [];
-            const resources = server.getResources ? server.getResources() : [];
+  // Set up heartbeat in the background
+  if (ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        // Wait a bit to ensure the client has processed the initial events
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-            serverInfo = {
-              ...serverInfo,
-              tools,
-              resources
-            };
-          } else {
-            // Fallback to minimal implementation
-            serverInfo.tools = [
-              {
-                name: "hello",
-                description: "Says hello",
-                input_schema: {
-                  type: "object",
-                  properties: { name: { type: "string" } }
-                }
-              }
-            ];
-            serverInfo.resources = [];
+        let connected = true;
+        const heartbeatInterval = setInterval(() => {
+          if (!connected) {
+            clearInterval(heartbeatInterval);
+            return;
           }
 
-          // Send server info after a small delay
-          setTimeout(() => {
-            sendEvent("server_info", serverInfo);
-          }, 100);
-
-          // Set up heartbeat interval
-          const interval = setInterval(() => {
-            sendEvent("heartbeat", {
+          try {
+            const heartbeat = `event: heartbeat\ndata: ${JSON.stringify({
               timestamp: new Date().toISOString(),
               status: "ok"
-            });
-          }, 5000);
+            })}\n\n`;
 
-          // Clean up on stream close
-          if (ctx) {
-            ctx.waitUntil(new Promise(() => {
-              // This promise intentionally never resolves to keep the connection
-            }));
+            writer.write(encoder.encode(heartbeat))
+              .catch(err => {
+                console.log("Heartbeat failed, connection likely closed:", err);
+                connected = false;
+                clearInterval(heartbeatInterval);
+              });
+          } catch (err) {
+            console.log("Error sending heartbeat:", err);
+            connected = false;
+            clearInterval(heartbeatInterval);
           }
-        } catch (err) {
-          console.error("Server initialization error:", err);
-          // Still send server info even on error
-          sendEvent("server_info", serverInfo);
-        }
-      })();
-    }
-  });
+        }, 10000);
 
-  // Return the readable stream with headers
-  return new Response(stream, { headers });
+        // Try to initialize real MCP server in background
+        // This won't affect the SSE connection, but might be used later
+        ensureServerInitialized().catch(err => {
+          console.log("Background server initialization failed:", err);
+        });
+      } catch (err) {
+        console.error("Error in SSE background tasks:", err);
+      }
+    })());
+  }
+
+  // Return the readable part of the transform stream with headers
+  return new Response(readable, { headers });
 }
 
 // Export the worker functionality
