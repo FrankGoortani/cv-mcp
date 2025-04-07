@@ -1,0 +1,36 @@
+name = "cv-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-04-06"
+
+# Make sure Node.js compatibility is enabled for better compatibility with npm packages
+compatibility_flags = ["nodejs_compat"]
+
+# Worker configuration
+workers_dev = true
+
+# Build settings for TypeScript
+[build]
+command = "npm run build"
+[build.upload]
+format = "esm"
+
+# Routes
+# This will route everything at cv-mcp.your-subdomain.workers.dev/* to this worker
+# Note: Uncomment and customize when you have your domain ready
+# routes = [
+#   { pattern = "cv-mcp.example.com/*", zone_name = "example.com" }
+# ]
+
+# Set up KV Namespace for data storage if needed
+# [kv_namespaces]
+# CV_DATA = { binding = "CV_DATA", id = "Your KV namespace ID here" }
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"
+
+# Development environment variables
+[env.dev]
+name = "cv-mcp-dev"
+[env.dev.vars]
+ENVIRONMENT = "development"
