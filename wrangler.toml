@@ -1,5 +1,5 @@
 name = "cv-mcp"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2025-04-06"
 
 # Make sure Node.js compatibility is enabled for better compatibility with npm packages
@@ -8,11 +8,14 @@ compatibility_flags = ["nodejs_compat"]
 # Worker configuration
 workers_dev = true
 
-# Build settings for TypeScript
+# Build settings
 [build]
-command = "npm run build"
+command = "npm run build:worker"
+
+# Output configuration
 [build.upload]
-format = "esm"
+format = "modules"
+main = "./build/worker.js"
 
 # Routes
 # This will route everything at cv-mcp.your-subdomain.workers.dev/* to this worker
