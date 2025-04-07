@@ -1,6 +1,5 @@
-// MCP Server implementation for Cloudflare Workers
+// A simplified MCP Server implementation for Cloudflare Workers
 
-// Define types for Cloudflare Workers runtime
 export interface Env {
   ENVIRONMENT: string;
 }
@@ -10,17 +9,13 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-// Handler for all requests
+// Main handler for all requests
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
       const url = new URL(request.url);
 
-      // Log basic request info for debugging
-      console.log(`Request: ${request.method} ${url.pathname}`);
-      console.log(`Query params:`, Object.fromEntries(url.searchParams.entries()));
-
-      // Handle CORS preflight requests globally
+      // CORS preflight request handler
       if (request.method === "OPTIONS") {
         return new Response(null, {
           status: 204,
@@ -44,40 +39,136 @@ export default {
         });
       }
 
-      // SSE endpoint - Direct or via proxy
+      // SSE endpoint
       if (url.pathname === "/sse") {
-        // CRITICAL: Handle special case for MCP Inspector proxy
-        const proxyTarget = url.searchParams.get('url');
-        if (proxyTarget) {
-          console.log("Proxy request detected, target:", proxyTarget);
+        // A simple SSE response with static data - more reliable approach
+        const headers = new Headers({
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+        });
 
-          // This is a proxy request, we need to strip out the "url" param
-          // and pass the request through as-is, since browsers are making
-          // the connection to the proxy, not directly to our worker
-          return handleSSEConnection(request, env, ctx);
-        }
+        // Instead of using TransformStream, create a ReadableStream directly
+        const stream = new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
 
-        return handleSSEConnection(request, env, ctx);
+            // Helper function to send an event
+            function send(event: string, data: Record<string, any>) {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            }
+
+            // Send initial connected event
+            send("connected", { status: "connected" });
+
+            // Send server_info event
+            send("server_info", {
+              name: "CV MCP Worker",
+              version: "1.0.0",
+              description: "Cloudflare Worker MCP Server",
+              status: "connected",
+              tools: [
+                {
+                  name: "hello",
+                  description: "Says hello",
+                  input_schema: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" }
+                    }
+                  }
+                }
+              ],
+              resources: []
+            });
+
+            // Set up heartbeat interval
+            const heartbeatInterval = setInterval(() => {
+              send("heartbeat", {
+                timestamp: new Date().toISOString(),
+                status: "ok"
+              });
+            }, 5000);
+
+            // Handle stream closing
+            ctx.waitUntil(
+              new Promise((resolve) => {
+                // Return a dummy promise that never resolves
+                // This keeps the stream open until the client disconnects
+              })
+            );
+          }
+        });
+
+        return new Response(stream, { headers });
       }
 
       // Tool endpoint
       if (url.pathname === "/tool" || url.pathname.startsWith("/tools/")) {
-        return handleToolRequest(request, url);
-      }
-
-      // API endpoints
-      if (url.pathname.startsWith("/api")) {
-        return new Response(JSON.stringify({
-          status: "success",
-          message: "API endpoint",
-          path: url.pathname,
-          query: Object.fromEntries(url.searchParams)
-        }), {
-          headers: { "Content-Type": "application/json" }
+        const headers = new Headers({
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "*"
         });
+
+        if (request.method !== "POST") {
+          return new Response(JSON.stringify({
+            status: "error",
+            message: "Tool requests must use POST method"
+          }), {
+            status: 405,
+            headers
+          });
+        }
+
+        try {
+          // Parse the request body
+          const body = await request.json();
+
+          // Extract tool name
+          let toolName = "unknown";
+          let toolArgs: Record<string, any> = {};
+
+          if (url.pathname.startsWith("/tools/")) {
+            toolName = url.pathname.split("/").pop() || "unknown";
+            toolArgs = body.arguments || body || {};
+          } else if (body.tool) {
+            toolName = body.tool;
+            toolArgs = body.arguments || {};
+          }
+
+          // Simple tool implementation
+          if (toolName === "hello") {
+            const name = toolArgs.name || "World";
+            return new Response(JSON.stringify({
+              status: "success",
+              result: `Hello, ${name}!`
+            }), { headers });
+          }
+
+          // Unknown tool
+          return new Response(JSON.stringify({
+            status: "error",
+            message: `Unknown tool: ${toolName}`
+          }), {
+            status: 404,
+            headers
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({
+            status: "error",
+            message: "Error processing tool request",
+            details: error instanceof Error ? error.message : String(error)
+          }), {
+            status: 500,
+            headers
+          });
+        }
       }
 
-      // Default 404 response
+      // Default 404 for unmatched routes
       return new Response(JSON.stringify({
         status: "not_found",
         message: `Endpoint not found: ${url.pathname}`
@@ -87,7 +178,7 @@ export default {
       });
 
     } catch (error) {
-      console.error("Worker error:", error);
+      // Catch-all error handler
       return new Response(JSON.stringify({
         status: "error",
         message: error instanceof Error ? error.message : "Unknown error"
@@ -98,172 +189,3 @@ export default {
     }
   }
 };
-
-// SSE connection handler
-async function handleSSEConnection(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  try {
-    console.log("Setting up SSE connection");
-
-    // Standard SSE headers required for browsers and MCP clients
-    const headers = new Headers({
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "*"
-    });
-
-    // Create a stream for the SSE connection
-    const stream = new TransformStream();
-    const writer = stream.writable.getWriter();
-    const encoder = new TextEncoder();
-
-    // Function to send properly formatted SSE messages
-    async function sendEvent(eventType: string, data: any) {
-      try {
-        // Format according to SSE standard
-        let message = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-        await writer.write(encoder.encode(message));
-        console.log(`Sent event: ${eventType}`);
-      } catch (e) {
-        console.error(`Error sending event ${eventType}:`, e);
-      }
-    }
-
-    // Send immediate connected event
-    await sendEvent("connected", { status: "connected" });
-
-    // Define server metadata for MCP
-    const serverInfo = {
-      name: "CV MCP Worker",
-      version: "1.0.0",
-      description: "Cloudflare Worker MCP Server",
-      status: "connected",
-      tools: [
-        {
-          name: "hello",
-          description: "Says hello",
-          input_schema: {
-            type: "object",
-            properties: {
-              name: { type: "string" }
-            }
-          }
-        }
-      ],
-      resources: []
-    };
-
-    // Send server_info and heartbeats in the background
-    ctx.waitUntil((async () => {
-      try {
-        // Send server_info with small delay to ensure client is ready
-        setTimeout(async () => {
-          await sendEvent("server_info", serverInfo);
-        }, 50);
-
-        // Send heartbeats
-        const interval = setInterval(async () => {
-          try {
-            await sendEvent("heartbeat", {
-              timestamp: new Date().toISOString(),
-              status: "ok"
-            });
-          } catch (e) {
-            clearInterval(interval);
-            writer.close().catch(console.error);
-          }
-        }, 10000);
-
-      } catch (error) {
-        console.error("SSE error:", error);
-        writer.close().catch(console.error);
-      }
-    })());
-
-    return new Response(stream.readable, { headers });
-  } catch (error) {
-    console.error("SSE connection error:", error);
-    return new Response(JSON.stringify({
-      status: "error",
-      message: "Error establishing SSE connection",
-      details: error instanceof Error ? error.message : String(error)
-    }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
-  }
-}
-
-// Tool request handler
-async function handleToolRequest(request: Request, url: URL): Promise<Response> {
-  const headers = new Headers({
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "*"
-  });
-
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({
-      status: "error",
-      message: "Tool requests must use POST method"
-    }), {
-      status: 405,
-      headers
-    });
-  }
-
-  try {
-    // Parse request body
-    const body = await request.json();
-    console.log("Tool request body:", JSON.stringify(body));
-
-    // Get tool name
-    let toolName = "unknown";
-    let toolArgs: Record<string, any> = {};
-
-    if (url.pathname.startsWith("/tools/")) {
-      toolName = url.pathname.split("/").pop() || "unknown";
-      toolArgs = body.arguments || body || {};
-    } else if (body.tool) {
-      toolName = body.tool;
-      toolArgs = body.arguments || {};
-    } else if (body.name) {
-      toolName = body.name;
-      toolArgs = body.arguments || body.input || {};
-    }
-
-    // Implement hello tool
-    if (toolName === "hello") {
-      const name = toolArgs.name || "World";
-      return new Response(JSON.stringify({
-        status: "success",
-        result: `Hello, ${name}!`,
-        tool: toolName,
-        timestamp: new Date().toISOString()
-      }), { headers });
-    }
-
-    // Unknown tool
-    return new Response(JSON.stringify({
-      status: "error",
-      message: `Unknown tool: ${toolName}`,
-      code: "unknown_tool"
-    }), {
-      status: 404,
-      headers
-    });
-  } catch (error) {
-    console.error("Tool processing error:", error);
-    return new Response(JSON.stringify({
-      status: "error",
-      message: "Error processing tool request",
-      details: error instanceof Error ? error.message : String(error)
-    }), {
-      status: 500,
-      headers
-    });
-  }
-}
