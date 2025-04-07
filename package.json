@@ -8,7 +8,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir build --target node",
-    "build:http": "bun build src/server/http-server.ts --outdir build --target browser --external node:* --external fs --external path --external crypto --external http --external timers --external stream --external zlib --external async_hooks --external buffer --external node:sqlite",
+    "build:http": "node scripts/worker-build.js",
     "build:worker": "bun build src/worker.ts --outdir build --target browser --external node:* --external fs --external path --external crypto --external http --external timers --external stream --external zlib --external async_hooks --external buffer",
     "dev": "bun --watch src/index.ts",
     "start:http": "bun run src/server/http-server.ts",

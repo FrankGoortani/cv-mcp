@@ -12,9 +12,7 @@ workers_dev = true
 [build]
 command = "npm run build:http"
 
-# Output configuration
-[build.upload]
-format = "modules"
+# Define the proper output file using native wrangler syntax
 main = "./build/http-server.js"
 
 # Routes
