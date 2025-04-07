@@ -10,12 +10,12 @@ workers_dev = true
 
 # Build settings
 [build]
-command = "npm run build:worker"
+command = "npm run build:http"
 
 # Output configuration
 [build.upload]
 format = "modules"
-main = "./build/worker.js"
+main = "./build/http-server.js"
 
 # Routes
 # This will route everything at cv-mcp.your-subdomain.workers.dev/* to this worker
