@@ -56,44 +56,137 @@ async function ensureServerInitialized() {
   return server;
 }
 
-// Handle SSE connections
-async function handleSSE(request: Request) {
-  // Setup SSE response headers
-  const headers = new Headers({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-  });
+// Handle SSE connections with improved Cloudflare Workers compatibility
+async function handleSSE(request: Request, ctx?: any) {
+  console.log("SSE connection request received");
 
-  // Create a TransformStream for handling the SSE data
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
+  // Check if this is an MCP Inspector proxy request
+  const url = new URL(request.url);
+  const transportType = url.searchParams.get('transportType');
+  const proxyUrl = url.searchParams.get('url');
 
-  // Ensure server is ready
-  try {
-    await ensureServerInitialized();
-  } catch (error) {
-    // Handle server initialization errors
-    console.error("Error initializing server for SSE:", error);
+  if (proxyUrl || transportType) {
+    console.log("MCP client detected:", transportType, proxyUrl);
   }
 
-  // Send initial connection message
-  const encoder = new TextEncoder();
-  writer.write(encoder.encode("event: connected\ndata: {\"status\":\"connected\"}\n\n"));
+  // Setup SSE response headers with CORS support
+  const headers = new Headers({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': '*'
+  });
 
-  // Use the Worker's context to keep the connection alive
-  return new Response(readable, { headers });
+  // Create a ReadableStream for more reliable SSE in Workers
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+
+      // Helper to send SSE events
+      function sendEvent(eventName: string, data: any) {
+        const event = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(event));
+        console.log(`Sent event: ${eventName}`);
+      }
+
+      // Send immediate connected event
+      sendEvent("connected", { status: "connected" });
+
+      // Initialize server in background if possible
+      let serverInfo: any = {
+        name: "CV MCP Worker",
+        version: "1.0.0",
+        description: "Cloudflare Worker MCP Server",
+        status: "connected"
+      };
+
+      // Try to initialize MCP server and get real tools/resources
+      (async () => {
+        try {
+          const server = await ensureServerInitialized();
+          if (server) {
+            // Get actual server info if available
+            const tools = server.getTools ? server.getTools() : [];
+            const resources = server.getResources ? server.getResources() : [];
+
+            serverInfo = {
+              ...serverInfo,
+              tools,
+              resources
+            };
+          } else {
+            // Fallback to minimal implementation
+            serverInfo.tools = [
+              {
+                name: "hello",
+                description: "Says hello",
+                input_schema: {
+                  type: "object",
+                  properties: { name: { type: "string" } }
+                }
+              }
+            ];
+            serverInfo.resources = [];
+          }
+
+          // Send server info after a small delay
+          setTimeout(() => {
+            sendEvent("server_info", serverInfo);
+          }, 100);
+
+          // Set up heartbeat interval
+          const interval = setInterval(() => {
+            sendEvent("heartbeat", {
+              timestamp: new Date().toISOString(),
+              status: "ok"
+            });
+          }, 5000);
+
+          // Clean up on stream close
+          if (ctx) {
+            ctx.waitUntil(new Promise(() => {
+              // This promise intentionally never resolves to keep the connection
+            }));
+          }
+        } catch (err) {
+          console.error("Server initialization error:", err);
+          // Still send server info even on error
+          sendEvent("server_info", serverInfo);
+        }
+      })();
+    }
+  });
+
+  // Return the readable stream with headers
+  return new Response(stream, { headers });
 }
 
 // Export the worker functionality
 export default {
-  async fetch(request: Request, env: any, ctx: any) {
-    const url = new URL(request.url);
-
+  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
     try {
+      const url = new URL(request.url);
+
+      console.log(`Request: ${request.method} ${url.pathname}`);
+
+      // Handle preflight CORS requests for all endpoints
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "86400"
+          }
+        });
+      }
+
       // Handle SSE endpoint
       if (url.pathname === "/sse") {
-        return handleSSE(request);
+        return handleSSE(request, ctx);
       }
 
       // Handle health check
@@ -119,7 +212,7 @@ export default {
           }), {
             headers: { "Content-Type": "application/json" }
           });
-        } catch (error) {
+        } catch (error: any) {
           return new Response(JSON.stringify({
             status: "error",
             message: "API processing error",
@@ -131,13 +224,95 @@ export default {
         }
       }
 
+      // Handle tool endpoints
+      if (url.pathname === "/tool" || url.pathname.startsWith("/tools/")) {
+        const headers = new Headers({
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "*"
+        });
+
+        if (request.method !== "POST") {
+          return new Response(JSON.stringify({
+            status: "error",
+            message: "Tool requests must use POST method"
+          }), {
+            status: 405,
+            headers
+          });
+        }
+
+        try {
+          // Parse the request body
+          const body = await request.json();
+
+          // Extract tool name
+          let toolName = "unknown";
+          let toolArgs: Record<string, any> = {};
+
+          if (url.pathname.startsWith("/tools/")) {
+            toolName = url.pathname.split("/").pop() || "unknown";
+            toolArgs = body.arguments || body || {};
+          } else if (body.tool) {
+            toolName = body.tool;
+            toolArgs = body.arguments || {};
+          }
+
+          console.log(`Processing tool request: ${toolName}`);
+
+          // Try to invoke the actual MCP server if available
+          const mcpServer = await ensureServerInitialized();
+          if (mcpServer && mcpServer.executeTool) {
+            const result = await mcpServer.executeTool(toolName, toolArgs);
+            return new Response(JSON.stringify({
+              status: "success",
+              result
+            }), { headers });
+          }
+
+          // Fallback implementation for the hello tool
+          if (toolName === "hello") {
+            const name = toolArgs.name || "World";
+            return new Response(JSON.stringify({
+              status: "success",
+              result: `Hello, ${name}!`
+            }), { headers });
+          }
+
+          // Unknown tool
+          return new Response(JSON.stringify({
+            status: "error",
+            message: `Unknown tool: ${toolName}`
+          }), {
+            status: 404,
+            headers
+          });
+        } catch (error: any) {
+          return new Response(JSON.stringify({
+            status: "error",
+            message: "Error processing tool request",
+            details: error instanceof Error ? error.message : String(error)
+          }), {
+            status: 500,
+            headers
+          });
+        }
+      }
+
       // Default response for unsupported paths
-      return new Response("Not found", { status: 404 });
-    } catch (error) {
+      return new Response(JSON.stringify({
+        status: "not_found",
+        message: `Endpoint not found: ${url.pathname}`
+      }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    } catch (error: any) {
       console.error("Worker error:", error);
       return new Response(JSON.stringify({
         status: "error",
-        message: error instanceof Error ? error.message : "Unknown error"
+        message: error instanceof Error ? error.message : String(error)
       }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
