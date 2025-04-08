@@ -1,5 +1,5 @@
 name = "cv-mcp"
-main = "src/server/http-server.ts"
+main = "./build/http-server.js"
 compatibility_date = "2025-04-06"
 
 # Make sure Node.js compatibility is enabled for better compatibility with npm packages
@@ -11,9 +11,6 @@ workers_dev = true
 # Build settings
 [build]
 command = "npm run build:http"
-
-# Define the proper output file using native wrangler syntax
-main = "./build/http-server.js"
 
 # Routes
 # This will route everything at cv-mcp.your-subdomain.workers.dev/* to this worker
@@ -36,7 +33,5 @@ name = "cv-mcp-dev"
 [env.dev.vars]
 ENVIRONMENT = "development"
 
-# Enable worker logs
-[log]
-enabled = true
-level = "debug"  # Options: error, warn, info, debug
+# Worker logs are managed through Cloudflare dashboard
+# or by using console.log() statements in your code
