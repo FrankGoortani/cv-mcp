@@ -32,10 +32,15 @@ try {
 let server: any;
 let initialized = false;
 
-// Initialize the server with fallback for compatibility issues
-async function ensureServerInitialized() {
-  // If we already have an error or already initialized, return early
-  if (importError || initialized) {
+// Initialize the server with FastMCP configuration
+async function ensureServerInitialized(transportType = 'sse', url?: string) {
+  // If we've already encountered an import error, return early
+  if (importError) {
+    return null;
+  }
+
+  // If server is already initialized, return the instance
+  if (initialized && server) {
     return server;
   }
 
@@ -46,118 +51,156 @@ async function ensureServerInitialized() {
 
     // Attempt to initialize the server
     server = await startServer();
-    initialized = true;
+
+    // Configure the server with proper transport
+    if (server && !initialized) {
+      console.log(`Configuring MCP server with transportType=${transportType}`);
+      // We'll complete the actual start in the handleSSE function
+      initialized = true;
+    }
+
     console.log("MCP Server initialized in Worker environment");
   } catch (err) {
     console.error("Failed to initialize MCP server:", err);
     importError = err instanceof Error ? err : new Error(String(err));
+    return null;
   }
 
   return server;
 }
 
-// Handle SSE connections with improved Cloudflare Workers compatibility
+// Handle SSE connections using FastMCP's native SSE transport
 async function handleSSE(request: Request, ctx?: any) {
-  console.log("SSE connection request received");
-
-  // Check if this is an MCP Inspector proxy request
+  // Parse client connection parameters
   const url = new URL(request.url);
-  const transportType = url.searchParams.get('transportType');
-  const proxyUrl = url.searchParams.get('url');
+  // Convert null to undefined or use default 'sse'
+  const transportType = url.searchParams.get('transportType') === null
+    ? 'sse'
+    : url.searchParams.get('transportType');
+  // Convert null to undefined
+  const proxyUrl = url.searchParams.get('url') || undefined;
 
-  if (proxyUrl || transportType) {
-    console.log("MCP client detected:", transportType, proxyUrl);
+  console.log(`SSE request: transportType=${transportType}, proxyUrl=${proxyUrl}`);
+
+  // Initialize the MCP server with the correct transport parameters
+  const mcpServer = await ensureServerInitialized(
+    transportType as string,  // TypeScript cast since we ensure it's not null above
+    proxyUrl
+  );
+
+  if (!mcpServer) {
+    // If server initialization failed, return error response
+    return new Response(JSON.stringify({
+      error: "Failed to initialize MCP server",
+      details: importError ? importError.message : "Unknown error"
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   }
 
-  // Setup SSE response headers with CORS support
-  const headers = new Headers({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': '*'
-  });
+  try {
+    // Use FastMCP's native SSE handler
+    // First check if the server has a handleSSERequest method (from FastMCP)
+    if (typeof mcpServer.handleSSERequest === 'function') {
+      // Use FastMCP's native SSE handler
+      console.log("Using FastMCP native SSE handler");
+      const response = await mcpServer.handleSSERequest(request);
+      return response;
+    } else {
+      // Fallback to manual SSE implementation for compatibility
+      console.log("Falling back to manual SSE implementation");
 
-  // Create a simple response with pre-generated SSE data
-  // This is a more reliable approach for Cloudflare Workers
-  const encoder = new TextEncoder();
+      // Setup SSE response headers with CORS support
+      const headers = new Headers({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': '*'
+      });
 
-  // Pre-generate the initial events
-  const initialEvents = [
-    `event: connected\ndata: ${JSON.stringify({ status: "connected" })}\n\n`,
-    `event: server_info\ndata: ${JSON.stringify({
-      name: "CV MCP Worker",
-      version: "1.0.0",
-      description: "Cloudflare Worker MCP Server",
-      status: "connected",
-      tools: [
-        {
-          name: "hello",
-          description: "Says hello",
-          input_schema: {
-            type: "object",
-            properties: { name: { type: "string" } }
-          }
+      // Create a simple response with pre-generated SSE data using proper MCP format
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+
+      // Get server info directly from the MCP server
+      // Construct a standard MCP-compliant server_info object
+      const serverInfo = {
+        name: mcpServer.name || "Frank Goortani CV MCP Server",
+        version: mcpServer.version || "1.0.0",
+        description: "Cloudflare Worker MCP Server for Frank Goortani's CV",
+        tools: Array.isArray(mcpServer.tools) ? mcpServer.tools : [],
+        resources: Array.isArray(mcpServer.resources) ? mcpServer.resources : [],
+        protocol: {
+          version: "0.1.0"
         }
-      ],
-      resources: []
-    })}\n\n`
-  ].join('');
+      };
 
-  // Create a transformer that will add heartbeats
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
+      // Log the server info being sent (helpful for debugging)
+      console.log("Sending server_info event with:",
+        `tools: ${serverInfo.tools.length}, `,
+        `resources: ${serverInfo.resources.length}`);
 
-  // Write the initial events immediately
-  writer.write(encoder.encode(initialEvents));
+      // Write MCP-compliant events
+      writer.write(encoder.encode(`event: connected\ndata: ${JSON.stringify({ status: "connected" })}\n\n`));
+      writer.write(encoder.encode(`event: server_info\ndata: ${JSON.stringify(serverInfo)}\n\n`));
 
-  // Set up heartbeat in the background
-  if (ctx) {
-    ctx.waitUntil((async () => {
-      try {
-        // Wait a bit to ensure the client has processed the initial events
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        let connected = true;
-        const heartbeatInterval = setInterval(() => {
-          if (!connected) {
-            clearInterval(heartbeatInterval);
-            return;
-          }
-
+      // Set up heartbeat in the background
+      if (ctx) {
+        ctx.waitUntil((async () => {
           try {
-            const heartbeat = `event: heartbeat\ndata: ${JSON.stringify({
-              timestamp: new Date().toISOString(),
-              status: "ok"
-            })}\n\n`;
+            let connected = true;
+            const heartbeatInterval = setInterval(() => {
+              if (!connected) {
+                clearInterval(heartbeatInterval);
+                return;
+              }
 
-            writer.write(encoder.encode(heartbeat))
-              .catch(err => {
-                console.log("Heartbeat failed, connection likely closed:", err);
+              try {
+                const heartbeat = `event: heartbeat\ndata: ${JSON.stringify({
+                  timestamp: new Date().toISOString()
+                })}\n\n`;
+
+                writer.write(encoder.encode(heartbeat))
+                  .catch(err => {
+                    console.log("Heartbeat failed, connection likely closed:", err);
+                    connected = false;
+                    clearInterval(heartbeatInterval);
+                  });
+              } catch (err) {
+                console.log("Error sending heartbeat:", err);
                 connected = false;
                 clearInterval(heartbeatInterval);
-              });
+              }
+            }, 10000);
           } catch (err) {
-            console.log("Error sending heartbeat:", err);
-            connected = false;
-            clearInterval(heartbeatInterval);
+            console.error("Error in SSE background tasks:", err);
           }
-        }, 10000);
-
-        // Try to initialize real MCP server in background
-        // This won't affect the SSE connection, but might be used later
-        ensureServerInitialized().catch(err => {
-          console.log("Background server initialization failed:", err);
-        });
-      } catch (err) {
-        console.error("Error in SSE background tasks:", err);
+        })());
       }
-    })());
-  }
 
-  // Return the readable part of the transform stream with headers
-  return new Response(readable, { headers });
+      // Return the readable part of the transform stream with headers
+      return new Response(readable, { headers });
+    }
+  } catch (error) {
+    console.error("Error handling SSE request:", error);
+    return new Response(JSON.stringify({
+      error: "Failed to handle SSE request",
+      details: error instanceof Error ? error.message : String(error)
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
 }
 
 // Export the worker functionality
@@ -181,6 +224,11 @@ export default {
         });
       }
 
+      // Initialize server early at worker start
+      if (!initialized) {
+        await ensureServerInitialized();
+      }
+
       // Handle SSE endpoint
       if (url.pathname === "/sse") {
         return handleSSE(request, ctx);
@@ -200,6 +248,7 @@ export default {
       // Handle API endpoints
       if (url.pathname.startsWith("/api")) {
         try {
+          // Server should already be initialized, but ensure it is
           await ensureServerInitialized();
 
           return new Response(JSON.stringify({
@@ -258,7 +307,7 @@ export default {
 
           console.log(`Processing tool request: ${toolName}`);
 
-          // Try to invoke the actual MCP server if available
+          // Server should already be initialized, but ensure it is
           const mcpServer = await ensureServerInitialized();
           if (mcpServer && mcpServer.executeTool) {
             const result = await mcpServer.executeTool(toolName, toolArgs);
@@ -328,6 +377,7 @@ if (typeof process !== 'undefined' && process.env) {
     if (startServer) {
       // Traditional server startup logic
       startServer().then((server: any) => {
+        // Configure with explicit SSE transport settings for local development
         server.start({
           transportType: "sse",
           sse: {
@@ -338,6 +388,7 @@ if (typeof process !== 'undefined' && process.env) {
 
         console.log(`MCP Server running at http://localhost:${PORT}`);
         console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
+        console.log(`Try it with: npx @modelcontextprotocol/inspector http://localhost:${PORT}/sse`);
       }).catch((error: Error) => {
         console.error("Failed to start server:", error);
         process.exit(1);
