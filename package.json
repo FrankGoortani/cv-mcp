@@ -13,10 +13,6 @@
     "dev": "bun --watch src/index.ts",
     "start:http": "bun run src/server/http-server.ts",
     "dev:http": "bun --watch src/server/http-server.ts",
-    "deploy": "npm run build:http && wrangler deploy",
-    "deploy:dev": "npm run build:http && wrangler deploy --env dev",
-    "dev:cf": "npm run build:http && wrangler dev --local",
-    "test:worker": "npm run build:http && wrangler dev",
     "inspector": "npx @modelcontextprotocol/inspector"
   },
   "devDependencies": {

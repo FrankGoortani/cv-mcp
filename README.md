@@ -408,6 +408,51 @@ const resumeLink = await client.callTool("get_resume_link", {});
 const pictureLink = await client.callTool("get_profile_picture", {});
 ```
 
+## Running with Docker
+
+This project can be run inside a Docker container, which is useful for deployment on platforms like Synology NAS or other container orchestration systems.
+
+### Prerequisites
+
+- [Docker](https://www.docker.com/get-started) installed on your system.
+
+### Building the Docker Image
+
+1.  Navigate to the project root directory (where the `Dockerfile` is located).
+2.  Run the following command to build the Docker image. Replace `cv-mcp` with your desired image name if needed.
+
+    ```bash
+    docker build -t cv-mcp .
+    ```
+
+### Running the Docker Container
+
+1.  Once the image is built, you can run it as a container. The application inside the container listens on port 3001. You need to map a port from your host machine to the container's port 3001.
+
+    ```bash
+    docker run -d -p 8080:3001 --name cv-mcp-container cv-mcp
+    ```
+
+    - `-d`: Runs the container in detached mode (in the background).
+    - `-p 8080:3001`: Maps port 8080 on your host machine to port 3001 inside the container. You can change `8080` to any available port on your host.
+    - `--name cv-mcp-container`: Assigns a name to the running container for easier management.
+    - `cv-mcp`: Specifies the image to run.
+
+2.  After running the container, the MCP server should be accessible. If you mapped host port 8080, the SSE endpoint would typically be `http://localhost:8080/sse`.
+
+3.  For deployment on Synology NAS, you would typically use the Synology Docker UI or command line to run the container, mapping the appropriate host port. The target URL for accessing the service via reverse proxy would be `https://mcp.goortani.synology.me/`. Ensure your reverse proxy is configured to forward requests to the host port you mapped (e.g., 8080).
+
+### Stopping and Removing the Container
+
+-   To stop the container:
+    ```bash
+    docker stop cv-mcp-container
+    ```
+-   To remove the container (after stopping):
+    ```bash
+    docker rm cv-mcp-container
+    ```
+
 ## License
 
 This project is licensed under the MIT License.

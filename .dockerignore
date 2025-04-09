@@ -1,0 +1,22 @@
+# Ignore node_modules directory
+node_modules
+
+# Ignore build output directory
+dist
+
+# Ignore Git directory and related files
+.git
+.gitignore
+
+# Ignore log files
+*.log
+
+# Ignore Docker related files
+Dockerfile
+.dockerignore
+
+# Ignore README file
+README.md
+
+# Ignore VSCode settings
+.vscode
