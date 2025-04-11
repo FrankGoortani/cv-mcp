@@ -8,8 +8,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir build --target node",
-    "build:http": "bun build src/server/http-server.ts --outdir build --target browser --external node:* --external node:sqlite --external fs --external path --external crypto --external timers --external stream --minify",
-    "build:worker": "bun build src/server/http-server.ts --outdir build --target browser --external node:* --external node:sqlite --external fs --external path --external crypto --external timers --external stream --minify",
+    "build:http": "bun build src/server/http-server.ts --outdir build --target node --external node:* --external node:sqlite --external fs --external path --external crypto --external timers --external stream --minify",
+    "build:worker": "bun build src/server/http-server.ts --outdir build --target node --external node:* --external node:sqlite --external fs --external path --external crypto --external timers --external stream --minify",
     "dev": "bun --watch src/index.ts",
     "start:http": "bun run src/server/http-server.ts",
     "dev:http": "bun --watch src/server/http-server.ts",

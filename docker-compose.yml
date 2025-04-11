@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  cv-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cv-mcp:latest
+    container_name: cv-mcp-server
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - REQUEST_TIMEOUT=30000
+      - PING_INTERVAL=30000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./media:/usr/src/app/media
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
