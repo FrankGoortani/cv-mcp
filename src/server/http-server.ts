@@ -192,6 +192,15 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
 
       // Configure server with enhanced settings and error handling
       try {
+        // Create the server URL with explicit HTTP protocol
+        const serverUrl = `http://localhost:${PORT}`;
+        const sseEndpoint = `${serverUrl}/sse`;
+
+        // Make the URL accessible to the server instance for clients
+        server.publicUrl = serverUrl;
+        server.sseEndpoint = sseEndpoint;
+
+        // Start the server with explicit HTTP protocol configuration
         server.start({
           transportType: "sse",
           sse: {
@@ -199,6 +208,8 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
             endpoint: "/sse", // Standard endpoint for SSE connections
             // Explicitly set protocol to HTTP to avoid HTTPS mismatch
             protocol: "http",
+            // Force the full URL to be HTTP to prevent clients from defaulting to HTTPS
+            url: sseEndpoint,
             // Add timeout handling
             requestTimeout: REQUEST_TIMEOUT,
             // Add connection retry logic
@@ -231,11 +242,20 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
       // Start ping mechanism
       pingTimer = startPingMechanism(server);
 
-      console.log(`MCP Server running at http://localhost:${PORT}`);
-      console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
-      console.log(`Health check: http://localhost:${PORT}/health`);
-      console.log(`Use Inspector: npx @modelcontextprotocol/inspector http://localhost:${PORT}/sse`);
+      // Force the URL to use HTTP protocol to prevent client from defaulting to HTTPS
+      const serverUrl = `http://localhost:${PORT}`;
+      const sseEndpoint = `${serverUrl}/sse`;
+
+      // Store the URL in the server instance for clients to access
+      server.baseUrl = serverUrl;
+      server.sseUrl = sseEndpoint;
+
+      console.log(`MCP Server running at ${serverUrl}`);
+      console.log(`SSE endpoint: ${sseEndpoint}`);
+      console.log(`Health check: ${serverUrl}/health`);
+      console.log(`Use Inspector: npx @modelcontextprotocol/inspector ${sseEndpoint}`);
       console.log(`IMPORTANT: Use HTTP protocol (not HTTPS) when connecting to this server`);
+      console.log(`\x1b[33mWARNING: If you see SSL protocol errors, ensure you're connecting with HTTP, not HTTPS\x1b[0m`);
 
       // Server started successfully
       break;
