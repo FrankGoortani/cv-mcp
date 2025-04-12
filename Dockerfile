@@ -2,7 +2,7 @@
 FROM --platform=linux/amd64 node:18-alpine AS builder
 
 # Install Bun with architecture awareness
-RUN apk add --no-cache curl unzip
+RUN apk add --no-cache curl unzip bash
 RUN curl -fsSL https://bun.sh/install | bash
 
 # Add Bun to PATH
@@ -33,7 +33,7 @@ FROM --platform=linux/amd64 node:18-alpine
 WORKDIR /usr/src/app
 
 # Install only the runtime dependencies and curl for health check
-RUN apk --no-cache add curl
+RUN apk --no-cache add curl bash
 
 # Install Bun runtime
 RUN curl -fsSL https://bun.sh/install | bash

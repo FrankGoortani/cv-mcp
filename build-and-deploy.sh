@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Configuration - modify these variables
-DOCKER_USERNAME="yourusername"  # Replace with your Docker Hub username
+DOCKER_USERNAME="frankgoortani"  # Docker Hub username
 VERIFY_BEFORE_PUSH=true         # Set to false to skip verification
 
 # Extract version from package.json
@@ -23,9 +23,11 @@ docker build --platform linux/amd64 \
   -t cv-mcp:$VERSION \
   -t cv-mcp:latest \
   -t cv-mcp:$VERSION-amd64 \
+  -t cv-mcp:latest-amd64 \
   -t $DOCKER_USERNAME/cv-mcp:$VERSION \
   -t $DOCKER_USERNAME/cv-mcp:latest \
   -t $DOCKER_USERNAME/cv-mcp:$VERSION-amd64 \
+  -t $DOCKER_USERNAME/cv-mcp:latest-amd64 \
   .
 
 # Step 3: Verify the image architecture
@@ -120,6 +122,7 @@ echo "🚀 Pushing images to Docker Hub..."
 docker push $DOCKER_USERNAME/cv-mcp:$VERSION
 docker push $DOCKER_USERNAME/cv-mcp:latest
 docker push $DOCKER_USERNAME/cv-mcp:$VERSION-amd64
+docker push $DOCKER_USERNAME/cv-mcp:latest-amd64
 
 echo ""
 echo "✅ Deployment preparation complete!"
