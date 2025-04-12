@@ -5,6 +5,7 @@ This guide provides step-by-step instructions for building, tagging, and pushing
 ## Table of Contents
 
 - [Version Management Strategy](#version-management-strategy)
+- [Architecture Considerations](#architecture-considerations)
 - [Building and Pushing to Docker Hub](#building-and-pushing-to-docker-hub)
 - [Updating on Synology NAS](#updating-on-synology-nas)
 - [Troubleshooting](#troubleshooting)
@@ -28,6 +29,31 @@ Docker images should follow this tagging convention:
 1. **Latest tag**: Always points to the most recent stable release
 2. **Version tag**: Explicit version number matching the package.json version
 3. **SHA tag**: Optional tag based on Git commit SHA for precise tracking
+4. **Architecture tag**: Adding the target architecture to the tag (e.g., `cv-mcp:1.0.2-amd64`)
+
+## Architecture Considerations
+
+### Synology NAS Architecture Compatibility
+
+Synology NAS devices primarily use **x86_64/amd64** architecture. When building Docker images for deployment on a Synology NAS, you must ensure the image is compatible with this architecture.
+
+If you build Docker images on a different architecture (like ARM64/Apple Silicon Macs), you'll encounter this error when running the container on Synology:
+
+```
+standard_init_linux.go:230: exec user process caused: exec format error
+```
+
+This error indicates an architecture mismatch between the built image and the target system.
+
+### Cross-Platform Building
+
+To ensure compatibility, you must explicitly specify the target platform when building Docker images:
+
+```bash
+docker build --platform linux/amd64 -t your-image-name .
+```
+
+This instructs Docker to create an image compatible with x86_64/amd64 architecture regardless of your build machine's architecture.
 
 ## Building and Pushing to Docker Hub
 
@@ -54,8 +80,8 @@ Build the image with the current version from package.json:
 # Extract version from package.json
 VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
 
-# Build the image
-docker build -t cv-mcp:$VERSION -t cv-mcp:latest .
+# Build the image for x86_64/amd64 architecture (required for Synology NAS)
+docker build --platform linux/amd64 -t cv-mcp:$VERSION -t cv-mcp:latest -t cv-mcp:$VERSION-amd64 .
 ```
 
 ### Step 3: Test the Docker Image Locally
@@ -92,6 +118,7 @@ VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
 # Tag the image
 docker tag cv-mcp:latest $DOCKER_USERNAME/cv-mcp:latest
 docker tag cv-mcp:$VERSION $DOCKER_USERNAME/cv-mcp:$VERSION
+docker tag cv-mcp:$VERSION-amd64 $DOCKER_USERNAME/cv-mcp:$VERSION-amd64
 
 # Optional: Tag with git commit SHA for precise version tracking
 GIT_SHA=$(git rev-parse --short HEAD)
@@ -114,6 +141,7 @@ VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
 # Push the images
 docker push $DOCKER_USERNAME/cv-mcp:latest
 docker push $DOCKER_USERNAME/cv-mcp:$VERSION
+docker push $DOCKER_USERNAME/cv-mcp:$VERSION-amd64
 
 # Optional: Push the SHA-tagged image
 GIT_SHA=$(git rev-parse --short HEAD)
@@ -121,6 +149,8 @@ docker push $DOCKER_USERNAME/cv-mcp:$GIT_SHA
 ```
 
 ## Updating on Synology NAS
+
+> **IMPORTANT:** Synology NAS devices use x86_64/amd64 architecture. You **must** build Docker images with `--platform linux/amd64` flag when deploying to Synology systems, especially if building on ARM-based machines (like Apple Silicon Macs).
 
 ### Using Synology Docker UI
 
@@ -218,6 +248,32 @@ If your Synology setup uses Docker Compose:
    ```
 
 ## Troubleshooting
+
+### Architecture Compatibility Issues
+
+If you see the error `standard_init_linux.go:230: exec user process caused: exec format error` when running the container:
+
+1. **Verify the image architecture**:
+   ```bash
+   sudo docker inspect yourusername/cv-mcp:latest | grep Architecture
+   ```
+   It should show `"Architecture": "amd64"` for Synology NAS compatibility.
+
+2. **Rebuild the image with the correct architecture**:
+   ```bash
+   # On your development machine
+   docker build --platform linux/amd64 -t yourusername/cv-mcp:latest -t yourusername/cv-mcp:$VERSION -t yourusername/cv-mcp:$VERSION-amd64 .
+   docker push yourusername/cv-mcp:latest
+   docker push yourusername/cv-mcp:$VERSION
+   docker push yourusername/cv-mcp:$VERSION-amd64
+   ```
+
+3. **Pull the correct architecture-specific tag** if available:
+   ```bash
+   # On Synology
+   sudo docker pull yourusername/cv-mcp:$VERSION-amd64
+   ```
+   Then run the container using this specific tag.
 
 ### Image Pull Failures
 

@@ -239,6 +239,19 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
       // Configure timeouts
       configureTimeouts(server);
 
+      // Add error event handler to catch and handle timeout errors
+      server.on('error', (err: any) => {
+        // Check if this is a timeout error (McpError with code -32001)
+        if (err.error && err.error.code === -32001) {
+          console.warn(`Request timeout occurred: ${JSON.stringify(err.error.data)}`);
+          // Handle the timeout gracefully without crashing
+          return; // Prevent error propagation
+        }
+
+        // For other errors, log them but don't crash
+        console.error('Server error:', err);
+      });
+
       // Start ping mechanism
       pingTimer = startPingMechanism(server);
 
