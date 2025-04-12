@@ -22,10 +22,14 @@ echo "🏗️ Building Docker image for amd64 architecture..."
 docker build --platform linux/amd64 \
   -t cv-mcp:$VERSION \
   -t cv-mcp:latest \
+  -t cv-mcp:fixed \
+  -t cv-mcp:fixed-ping \
   -t cv-mcp:$VERSION-amd64 \
   -t cv-mcp:latest-amd64 \
   -t $DOCKER_USERNAME/cv-mcp:$VERSION \
   -t $DOCKER_USERNAME/cv-mcp:latest \
+  -t $DOCKER_USERNAME/cv-mcp:fixed \
+  -t $DOCKER_USERNAME/cv-mcp:fixed-ping \
   -t $DOCKER_USERNAME/cv-mcp:$VERSION-amd64 \
   -t $DOCKER_USERNAME/cv-mcp:latest-amd64 \
   .
@@ -121,8 +125,11 @@ fi
 echo "🚀 Pushing images to Docker Hub..."
 docker push $DOCKER_USERNAME/cv-mcp:$VERSION
 docker push $DOCKER_USERNAME/cv-mcp:latest
+docker push $DOCKER_USERNAME/cv-mcp:fixed
+docker push $DOCKER_USERNAME/cv-mcp:fixed-ping
 docker push $DOCKER_USERNAME/cv-mcp:$VERSION-amd64
 docker push $DOCKER_USERNAME/cv-mcp:latest-amd64
+echo "Pushed image with fixed-ping tag to indicate stabilized version with robust ping mechanism and error handling improvements"
 
 echo ""
 echo "✅ Deployment preparation complete!"
@@ -131,7 +138,7 @@ echo "To deploy to your Synology NAS, use these commands:"
 echo "----------------------------------------------------"
 echo "# Via SSH on your Synology NAS:"
 echo "ssh admin@your-nas-ip"
-echo "sudo docker pull $DOCKER_USERNAME/cv-mcp:$VERSION-amd64"
+echo "sudo docker pull $DOCKER_USERNAME/cv-mcp:fixed-ping"
 echo "sudo docker stop cv-mcp-server || true"
 echo "sudo docker rm cv-mcp-server || true"
 echo "sudo docker run -d \\"
@@ -141,12 +148,12 @@ echo "  -p 3001:3001 \\"
 echo "  -v /path/on/nas/media:/usr/src/app/media \\"
 echo "  -e NODE_ENV=production \\"
 echo "  -e PORT=3001 \\"
-echo "  -e REQUEST_TIMEOUT=30000 \\"
-echo "  -e PING_INTERVAL=30000 \\"
-echo "  $DOCKER_USERNAME/cv-mcp:$VERSION-amd64"
+echo "  -e REQUEST_TIMEOUT=120000 \\"
+echo "  -e PING_INTERVAL=60000 \\"
+echo "  $DOCKER_USERNAME/cv-mcp:fixed-ping"
 echo ""
 echo "# Or via Docker Compose on your Synology NAS:"
 echo "Update your docker-compose.yml on the NAS with:"
-echo "image: $DOCKER_USERNAME/cv-mcp:$VERSION-amd64"
+echo "image: $DOCKER_USERNAME/cv-mcp:fixed-ping"
 echo "Then run: sudo docker-compose up -d"
 echo "----------------------------------------------------"
