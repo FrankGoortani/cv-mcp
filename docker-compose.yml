@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
     image: cv-mcp:latest
     container_name: cv-mcp-server
     restart: always

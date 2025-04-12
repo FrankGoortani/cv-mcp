@@ -1,32 +1,61 @@
-# Use an official Bun runtime as a parent image
-FROM oven/bun:1-alpine
+# Use a more architecture-compatible base image with explicit architecture tag
+FROM --platform=linux/amd64 node:18-alpine AS builder
 
-# Set the working directory in the container
+# Install Bun with architecture awareness
+RUN apk add --no-cache curl unzip
+RUN curl -fsSL https://bun.sh/install | bash
+
+# Add Bun to PATH
+ENV PATH=/root/.bun/bin:$PATH
+
+# Verify Bun is properly installed with correct architecture
+RUN bun --version
+
+# Set the working directory
 WORKDIR /usr/src/app
 
-# Install curl for health check (can be removed if alternative is used)
-RUN apk --no-cache add curl
-
-# Copy package.json and bun.lockb
-# Copying bun.lockb ensures reproducible installs
+# Copy package.json and bun.lockb (if it exists)
 COPY package.json bun.lockb* ./
-# The '*' handles cases where bun.lockb might not exist initially
 
-# Install dependencies using bun install --frozen-lockfile
-# This ensures dependencies are installed exactly as specified in the lockfile
+# Install dependencies
 RUN bun install --frozen-lockfile
 
 # Copy the rest of the application source code
 COPY . .
 
-# Build the TypeScript project using the specific http build script
+# Build the TypeScript project
 RUN bun build src/server/http-server.ts --outdir build --target node
+
+# Start a new build stage to create a clean production image
+FROM --platform=linux/amd64 node:18-alpine
+
+# Set working directory
+WORKDIR /usr/src/app
+
+# Install only the runtime dependencies and curl for health check
+RUN apk --no-cache add curl
+
+# Install Bun runtime
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH=/root/.bun/bin:$PATH
+
+# Copy built application from builder stage
+COPY --from=builder /usr/src/app/build ./build
+COPY --from=builder /usr/src/app/package.json ./
+
+# Copy the media folder for file serving
+COPY ./media ./media
+
+# Install only production dependencies
+RUN bun install --production --frozen-lockfile
+
+# Print architecture information for debugging
+RUN uname -a
 
 # Expose the port the app runs on
 EXPOSE 3001
 
 # Add health check
-# Check if the service responds to HTTP requests every 30 seconds
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:3001/health || exit 1
 
@@ -36,6 +65,5 @@ ENV PORT=3001
 ENV REQUEST_TIMEOUT=30000
 ENV PING_INTERVAL=30000
 
-# Define the command to run the application using bun
-# Executes the built server file directly
+# Define the command to run the application
 CMD ["bun", "run", "build/http-server.js"]

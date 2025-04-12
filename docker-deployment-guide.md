@@ -35,7 +35,11 @@ Docker images should follow this tagging convention:
 
 ### Synology NAS Architecture Compatibility
 
-Synology NAS devices primarily use **x86_64/amd64** architecture. When building Docker images for deployment on a Synology NAS, you must ensure the image is compatible with this architecture.
+Synology NAS devices primarily use **x86_64/amd64** architecture. When building Docker images for deployment on a Synology NAS, you must ensure the image is compatible with this architecture at multiple levels:
+
+1. **Base image architecture**: Every image in a multi-stage build must be explicitly set to amd64
+2. **Build tools and binaries**: Any tools or binaries installed during the build must be compatible
+3. **Runtime dependencies**: All runtime dependencies must be architecture-compatible
 
 If you build Docker images on a different architecture (like ARM64/Apple Silicon Macs), you'll encounter this error when running the container on Synology:
 
@@ -45,15 +49,30 @@ standard_init_linux.go:230: exec user process caused: exec format error
 
 This error indicates an architecture mismatch between the built image and the target system.
 
-### Cross-Platform Building
+### Cross-Platform Building Solutions
 
-To ensure compatibility, you must explicitly specify the target platform when building Docker images:
+Simply using the `--platform` flag at build time is sometimes insufficient, especially with images that install architecture-specific binaries. For complete compatibility, you need multiple layers of architecture specification:
 
-```bash
-docker build --platform linux/amd64 -t your-image-name .
-```
+1. **Specify platform in the Dockerfile itself**:
+   ```dockerfile
+   FROM --platform=linux/amd64 node:18-alpine
+   ```
 
-This instructs Docker to create an image compatible with x86_64/amd64 architecture regardless of your build machine's architecture.
+2. **Use explicit architecture tags** for base images:
+   ```dockerfile
+   FROM node:18-alpine@sha256:xxxxxx # where xxxxxx is a digest known to be amd64
+   ```
+
+3. **Build with platform flag**:
+   ```bash
+   docker build --platform linux/amd64 -t your-image-name .
+   ```
+
+4. **Verify the architecture** before deployment:
+   ```bash
+   docker inspect your-image-name | grep Architecture
+   # Should show "amd64"
+   ```
 
 ## Building and Pushing to Docker Hub
 
@@ -80,11 +99,25 @@ Build the image with the current version from package.json:
 # Extract version from package.json
 VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
 
-# Build the image for x86_64/amd64 architecture (required for Synology NAS)
+# Build the image with explicit architecture settings
+# This uses the --platform flag AND the Dockerfile's platform directives
 docker build --platform linux/amd64 -t cv-mcp:$VERSION -t cv-mcp:latest -t cv-mcp:$VERSION-amd64 .
 ```
 
-### Step 3: Test the Docker Image Locally
+### Step 3: Verify Image Architecture
+
+Before testing, verify that the image has the correct architecture:
+
+```bash
+# Check the architecture of the built image
+docker inspect cv-mcp:latest | grep Architecture
+# Should explicitly show "amd64"
+
+# For more detailed information
+docker inspect cv-mcp:latest | grep -A 10 "Architecture\|Os"
+```
+
+### Step 4: Test the Docker Image Locally
 
 Before pushing, verify that the image works correctly:
 
@@ -251,29 +284,58 @@ If your Synology setup uses Docker Compose:
 
 ### Architecture Compatibility Issues
 
-If you see the error `standard_init_linux.go:230: exec user process caused: exec format error` when running the container:
+The error `standard_init_linux.go:230: exec user process caused: exec format error` indicates an architecture mismatch that can occur for several reasons:
 
-1. **Verify the image architecture**:
-   ```bash
-   sudo docker inspect yourusername/cv-mcp:latest | grep Architecture
+1. **Image built for wrong architecture**: The most common cause is building on ARM64 (Apple Silicon) without proper cross-platform settings.
+
+2. **Multi-stage builds with mixed architectures**: If any stage in a multi-stage build uses the wrong architecture, the final image may fail.
+
+3. **Architecture-specific binaries or packages**: Some packages or binaries installed during build may be architecture-dependent.
+
+4. **Base image incompatibility**: The base image might not support proper cross-compilation for the target architecture.
+
+#### Solutions:
+
+1. **Update Dockerfile to explicitly specify architecture at each stage**:
+   ```dockerfile
+   FROM --platform=linux/amd64 base-image:tag
+   # For multi-stage builds, specify for each FROM statement
    ```
-   It should show `"Architecture": "amd64"` for Synology NAS compatibility.
 
-2. **Rebuild the image with the correct architecture**:
+2. **Verify architecture before pushing**:
+   ```bash
+   # Check architecture of the image
+   docker inspect yourusername/cv-mcp:latest | grep Architecture
+
+   # For more detailed information about platform
+   docker inspect --format '{{.Os}}/{{.Architecture}}' yourusername/cv-mcp:latest
+
+   # Check for any executable files architecture
+   docker run --rm yourusername/cv-mcp:latest file /usr/bin/node
+   docker run --rm yourusername/cv-mcp:latest file /root/.bun/bin/bun
+   ```
+
+3. **Rebuild with comprehensive architecture settings**:
    ```bash
    # On your development machine
+   # Use buildx for better cross-platform support
+   docker buildx create --use
+   docker buildx build --platform linux/amd64 -t yourusername/cv-mcp:latest -t yourusername/cv-mcp:$VERSION -t yourusername/cv-mcp:$VERSION-amd64 --push .
+
+   # Alternatively, use standard build
    docker build --platform linux/amd64 -t yourusername/cv-mcp:latest -t yourusername/cv-mcp:$VERSION -t yourusername/cv-mcp:$VERSION-amd64 .
    docker push yourusername/cv-mcp:latest
    docker push yourusername/cv-mcp:$VERSION
    docker push yourusername/cv-mcp:$VERSION-amd64
    ```
 
-3. **Pull the correct architecture-specific tag** if available:
+4. **Pull and run using architecture-specific tag on Synology**:
    ```bash
    # On Synology
    sudo docker pull yourusername/cv-mcp:$VERSION-amd64
+   sudo docker tag yourusername/cv-mcp:$VERSION-amd64 yourusername/cv-mcp:latest
    ```
-   Then run the container using this specific tag.
+   Then run the container using this verified architecture-specific image.
 
 ### Image Pull Failures
 
@@ -333,5 +395,23 @@ If the container starts but health checks fail:
    ```
 
 3. **Check for resource constraints**:
-   ```bash
-   sudo docker stats cv-mcp-server
+    ```bash
+    sudo docker stats cv-mcp-server
+    ```
+
+### Checking Node.js and Bun Architecture
+
+If you suspect the architecture mismatch might be in specific binaries:
+
+```bash
+# Check Node.js architecture inside the container
+docker run --rm yourusername/cv-mcp:latest node --print "process.arch"
+# Should output "x64" for amd64 architecture
+
+# Check system architecture inside the container
+docker run --rm yourusername/cv-mcp:latest uname -m
+# Should output "x86_64" for amd64 architecture
+
+# Check if Bun is running with the correct architecture
+docker run --rm yourusername/cv-mcp:latest /bin/sh -c "bun --version && echo 'Architecture:' && uname -m"
+```
