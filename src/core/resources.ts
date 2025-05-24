@@ -9,7 +9,7 @@ import path from 'path';
  * Register all resources with the MCP server
  * @param server The FastMCP server instance
  */
-export function registerResources(server: FastMCP) {
+export function registerResources<T extends Record<string, unknown> | undefined>(server: FastMCP<T>) {
   // Frank Goortani CV markdown resource
   server.addResource({
     uri: "cv://frankgoortani",

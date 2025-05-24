@@ -424,7 +424,7 @@ const cvData = {
  *
  * @param server The FastMCP server instance
  */
-export function registerTools(server: FastMCP) {
+export function registerTools<T extends Record<string, unknown> | undefined>(server: FastMCP<T>) {
   // CV Tools
   server.addTool({
     name: "get_profile",
