@@ -161,7 +161,7 @@ Retrieves work experience at a specific company.
 
 - **Parameters**:
   - `company` (string): Company name to get experience for
-- **Returns**: JSON object with matching experiences
+- **Returns**: JSON object with matching experiences. Throws `UserError` if none found.
 
 Example:
 
@@ -173,7 +173,6 @@ const result = await client.callTool("get_company_experience", {
 
 // Response
 {
-  "found": true,
   "experiences": [
     {
       "company": "Uber",
