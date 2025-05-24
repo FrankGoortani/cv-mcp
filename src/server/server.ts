@@ -25,6 +25,14 @@ async function startServer() {
     registerTools(server);
     registerPrompts(server);
 
+    // Log when clients connect or disconnect
+    server.on("connect", ({ session }) => {
+      console.log("Client connected:", session.id);
+    });
+    server.on("disconnect", ({ session }) => {
+      console.log("Client disconnected:", session.id);
+    });
+
     // Log server information
     console.error(`MCP Server initialized`);
     console.error("Server is ready to handle requests");
