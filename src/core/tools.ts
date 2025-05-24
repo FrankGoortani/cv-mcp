@@ -1,4 +1,4 @@
-import { FastMCP } from "fastmcp";
+import { FastMCP, UserError } from "fastmcp";
 import { z } from "zod";
 import * as services from "./services/index.js";
 
@@ -661,7 +661,7 @@ export function registerTools(server: FastMCP) {
 
   server.addTool({
     name: "get_company_experience",
-    description: "Get Frank Goortani's experience at a specific company",
+    description: "Get Frank Goortani's experience at a specific company. Throws UserError if none found.",
     parameters: z.object({
       company: z.string().describe("Company name to get experience for")
     }),
@@ -671,11 +671,11 @@ export function registerTools(server: FastMCP) {
         exp.company.toLowerCase().includes(companyName)
       );
 
-      const result = companyExperiences.length === 0
-        ? { found: false, message: `No experience found for company: ${params.company}` }
-        : { found: true, experiences: companyExperiences };
+      if (companyExperiences.length === 0) {
+        throw new UserError(`No experience found for company: ${params.company}`);
+      }
 
-      return JSON.stringify(result);
+      return JSON.stringify({ experiences: companyExperiences });
     }
   });
 
