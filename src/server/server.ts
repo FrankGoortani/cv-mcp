@@ -18,7 +18,7 @@ async function startServer() {
       ping: { enabled: true, intervalMs: pingInterval },
       health: { enabled: true, path: healthPath, message: "ok" },
       roots: { enabled: false }
-    });
+    } as any);
 
     // Register all resources, tools, and prompts
     registerResources(server);

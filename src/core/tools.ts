@@ -486,19 +486,33 @@ export function registerTools(server: FastMCP) {
     parameters: z.object({
       query: z.string().describe("The search term to look for in the CV")
     }),
-    execute: async (params) => {
+    execute: async (
+      params,
+      { log, reportProgress, streamContent }: { log: any; reportProgress: any; streamContent?: (content: any) => Promise<void> }
+    ) => {
       const query = params.query.toLowerCase();
       const results = {
         matches: [] as Array<{section: string, content: string}>
       };
 
+      log.info("Starting CV search", { query });
+
+      const totalSections = 8;
+      let processedSections = 0;
+
       // Search in profile
       if (cvData.profile.description.toLowerCase().includes(query)) {
-        results.matches.push({
+        const match = {
           section: "profile",
           content: cvData.profile.description
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in education
       const matchingEducation = cvData.education.filter(edu =>
@@ -506,13 +520,19 @@ export function registerTools(server: FastMCP) {
         edu.degree.toLowerCase().includes(query)
       );
       if (matchingEducation.length > 0) {
-        results.matches.push({
+        const match = {
           section: "education",
           content: matchingEducation.map(edu =>
             `${edu.degree} from ${edu.institution} (${edu.year})`
           ).join("\n")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in links
       const matchingLinks = cvData.links.filter(link =>
@@ -520,13 +540,19 @@ export function registerTools(server: FastMCP) {
         link.url.toLowerCase().includes(query)
       );
       if (matchingLinks.length > 0) {
-        results.matches.push({
+        const match = {
           section: "links",
           content: matchingLinks.map(link =>
             `${link.name}: ${link.url}`
           ).join("\n")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in startups
       const matchingStartups = cvData.startups.filter(startup =>
@@ -534,65 +560,100 @@ export function registerTools(server: FastMCP) {
         startup.year.toLowerCase().includes(query)
       );
       if (matchingStartups.length > 0) {
-        results.matches.push({
+        const match = {
           section: "startups",
           content: matchingStartups.map(startup =>
             `${startup.name} (${startup.year})`
           ).join("\n")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in skills
       const matchingSkills = cvData.skills.filter(skill =>
         skill.toLowerCase().includes(query)
       );
       if (matchingSkills.length > 0) {
-        results.matches.push({
+        const match = {
           section: "skills",
           content: matchingSkills.join(", ")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in interests
       const matchingInterests = cvData.interests.filter(interest =>
         interest.toLowerCase().includes(query)
       );
       if (matchingInterests.length > 0) {
-        results.matches.push({
+        const match = {
           section: "interests",
           content: matchingInterests.join(", ")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in experience
-      cvData.experience.forEach(exp => {
+      cvData.experience.forEach(async (exp) => {
         const matchingHighlights = exp.highlights.filter(highlight =>
           highlight.toLowerCase().includes(query)
         );
 
-        if (exp.company.toLowerCase().includes(query) ||
-            exp.title.toLowerCase().includes(query) ||
-            exp.period.toLowerCase().includes(query) ||
-            matchingHighlights.length > 0) {
-          results.matches.push({
+        if (
+          exp.company.toLowerCase().includes(query) ||
+          exp.title.toLowerCase().includes(query) ||
+          exp.period.toLowerCase().includes(query) ||
+          matchingHighlights.length > 0
+        ) {
+          const match = {
             section: `experience at ${exp.company} (${exp.period})`,
-            content: matchingHighlights.length > 0
-              ? matchingHighlights.join("\n")
-              : `${exp.title} at ${exp.company}, ${exp.period}`
-          });
+            content:
+              matchingHighlights.length > 0
+                ? matchingHighlights.join("\n")
+                : `${exp.title} at ${exp.company}, ${exp.period}`
+          };
+          results.matches.push(match);
+          if (streamContent) {
+            await streamContent({ text: JSON.stringify(match), type: "text" });
+          }
         }
       });
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
 
       // Search in keywords
       const matchingKeywords = cvData.keywords.filter(keyword =>
         keyword.toLowerCase().includes(query)
       );
       if (matchingKeywords.length > 0) {
-        results.matches.push({
+        const match = {
           section: "keywords",
           content: matchingKeywords.join(", ")
-        });
+        };
+        results.matches.push(match);
+        if (streamContent) {
+          await streamContent({ text: JSON.stringify(match), type: "text" });
+        }
       }
+      processedSections++;
+      await reportProgress({ progress: processedSections, total: totalSections });
+
+      log.info("Finished CV search", { matches: results.matches.length });
 
       return JSON.stringify(results);
     }
