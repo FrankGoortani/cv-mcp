@@ -6,10 +6,18 @@ import { registerPrompts } from "../core/prompts.js";
 // Create and start the MCP server
 async function startServer() {
   try {
+    // Environment overrides for ping interval and health path
+    const pingInterval = parseInt(process.env.PING_INTERVAL || "60000", 10);
+    const healthPath = process.env.HEALTH_PATH || "/health";
+
     // Create a new FastMCP server instance
     const server = new FastMCP({
       name: "Frank Goortani CV MCP Server",
-      version: "1.0.0"
+      version: "1.0.0",
+      instructions: "Describes how to use the CV tools and resources.",
+      ping: { enabled: true, intervalMs: pingInterval },
+      health: { enabled: true, path: healthPath, message: "ok" },
+      roots: { enabled: false }
     });
 
     // Register all resources, tools, and prompts
