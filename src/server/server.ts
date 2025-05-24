@@ -2,23 +2,35 @@ import { FastMCP } from "fastmcp";
 import { registerResources } from "../core/resources.js";
 import { registerTools } from "../core/tools.js";
 import { registerPrompts } from "../core/prompts.js";
+import type { IncomingMessage } from "http";
 
 // Create and start the MCP server
 async function startServer() {
   try {
     // Environment overrides for ping interval and health path
     const pingInterval = parseInt(process.env.PING_INTERVAL || "60000", 10);
-    const healthPath = process.env.HEALTH_PATH || "/health";
 
     // Create a new FastMCP server instance
-    const server = new FastMCP({
+    const server = new FastMCP<{ id: string }>({
       name: "Frank Goortani CV MCP Server",
       version: "1.0.0",
       instructions: "Describes how to use the CV tools and resources.",
       ping: { enabled: true, intervalMs: pingInterval },
-      health: { enabled: true, path: healthPath, message: "ok" },
-      roots: { enabled: false }
-    } as any);
+      roots: { enabled: false },
+      authenticate: async (request: IncomingMessage) => {
+        const apiKeyHeader = request.headers["x-api-key"];
+        const expectedKey = process.env.API_KEY;
+
+        if (typeof apiKeyHeader !== "string" || apiKeyHeader !== expectedKey) {
+          throw new Response(null, {
+            status: 401,
+            statusText: "Unauthorized",
+          });
+        }
+
+        return { id: apiKeyHeader };
+      },
+    });
 
     // Register all resources, tools, and prompts
     registerResources(server);
@@ -27,10 +39,12 @@ async function startServer() {
 
     // Log when clients connect or disconnect
     server.on("connect", ({ session }) => {
-      console.log("Client connected:", session.id);
+      const userId = (session as any).auth?.id ?? (session as any).id;
+      console.log("Client connected:", userId);
     });
     server.on("disconnect", ({ session }) => {
-      console.log("Client disconnected:", session.id);
+      const userId = (session as any).auth?.id ?? (session as any).id;
+      console.log("Client disconnected:", userId);
     });
 
     // Log server information

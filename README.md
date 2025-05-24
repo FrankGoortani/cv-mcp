@@ -308,6 +308,7 @@ The project uses the following environment variables that can be configured:
 - `PORT`: HTTP port for local development (default: 3001)
 - `HOST`: Host binding for HTTP server (default: 0.0.0.0)
 - `ENVIRONMENT`: Current environment (development/production)
+- `API_KEY`: API key required in the `x-api-key` header for all requests
 
 In Cloudflare, these variables are configured in the `wrangler.toml` file:
 
@@ -330,8 +331,10 @@ ENVIRONMENT = "development"
 npx fastmcp dev "bun run start"
 
 # Connect via HTTP transport
-npx fastmcp connect http://localhost:3001/sse
+npx fastmcp connect http://localhost:3001/sse -H "x-api-key:<your-api-key>"
 ```
+
+Make sure to replace `<your-api-key>` with the value of the `API_KEY` environment variable.
 
 #### Connecting from Cursor
 
