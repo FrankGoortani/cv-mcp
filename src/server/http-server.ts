@@ -96,192 +96,6 @@ const handleShutdown = async () => {
 process.on('SIGTERM', handleShutdown);
 process.on('SIGINT', handleShutdown);
 
-// Implement ping mechanism with error handling and anti-crash safeguards
-const startPingMechanism = (serverInstance: any) => {
-  const pingInterval = parseInt(process.env.PING_INTERVAL || "60000", 10); // 60 seconds between pings
-
-  // Create a custom ping implementation if one doesn't exist
-  const safePingServer = async () => {
-    // Wrap ping in a try-catch to prevent any errors from escaping
-    try {
-      // Check if the server has a native ping method
-      if (typeof serverInstance.ping === 'function') {
-        // This is the key problematic area - wrap the server.ping() call
-        // in a custom try-catch to prevent error propagation
-        try {
-          return await serverInstance.ping();
-        } catch (pingError) {
-          // CRITICAL FIX: Capture and handle the ping error here
-          // instead of letting it bubble up and potentially crash the container
-          console.warn(`Server ping method threw an error: ${
-            pingError instanceof Error ? pingError.message : String(pingError)
-          }`);
-
-          // Check for the specific MCP timeout error that's causing the crashes
-          const isMcpTimeoutError =
-            (pingError as any)?.code === -32001 ||
-            (pingError as any)?.error?.code === -32001;
-
-          if (isMcpTimeoutError) {
-            console.warn("MCP timeout error detected in ping operation");
-          }
-
-          // Return false to indicate ping failure but don't throw
-          return false;
-        }
-      }
-
-      // Custom ping implementation using server's health check or status
-      // This is a fallback mechanism when the server doesn't provide a ping method
-      if (serverInstance.isRunning && typeof serverInstance.isRunning === 'function') {
-        return await serverInstance.isRunning();
-      }
-
-      // If no built-in health check, just return success if server exists and has expected properties
-      if (serverInstance && serverInstance.start) {
-        return true; // Server instance exists and seems valid
-      }
-
-      // Return false as a last resort instead of throwing
-      return false;
-    } catch (error) {
-      // Catch any errors that might occur in our own code above
-      console.error(`Error in ping wrapper: ${error instanceof Error ? error.message : String(error)}`);
-      return false; // Don't throw, just indicate failure
-    }
-  };
-
-  // Initialize backoff mechanism state variables
-  let currentPingDelay = pingInterval;
-  const MAX_PING_DELAY = pingInterval * 5; // Maximum delay between pings
-  const BACKOFF_FACTOR = 1.5; // Backoff factor for exponential delay
-  const RECOVERY_THRESHOLD = 3; // Successful pings before resetting delay
-  let successfulPingsCount = 0;
-  let failedPingsCount = 0;
-  let pingTimerRef: NodeJS.Timeout | null = null;
-
-  // Define the ping function that will be used by the interval
-  const performPing = async () => {
-    try {
-      // Send ping to check server health with an extended timeout
-      // We're using our safePingServer instead of directly calling server.ping()
-      const pingResult = await Promise.race([
-        safePingServer(),
-        new Promise<boolean>((resolve, reject) => {
-          // Use resolve(false) instead of reject to avoid throwing exceptions
-          setTimeout(() => resolve(false), 10000); // Extended timeout for ping
-        })
-      ]);
-
-      // If ping was successful (true)
-      if (pingResult === true) {
-        console.log(`Ping successful: ${new Date().toISOString()}`);
-
-        // Track successful pings for recovery
-        successfulPingsCount++;
-        failedPingsCount = 0;
-
-        // Reset ping delay after sufficient successful pings
-        if (successfulPingsCount >= RECOVERY_THRESHOLD && currentPingDelay !== pingInterval) {
-          console.log("Ping stability restored, resetting ping interval");
-          currentPingDelay = pingInterval;
-
-          // Reconfigure the ping timer with original interval
-          if (pingTimerRef) {
-            clearInterval(pingTimerRef);
-            pingTimerRef = setInterval(performPing, pingInterval);
-          }
-        }
-      } else {
-        // Handle ping failure without throwing an exception
-        console.warn(`Ping failed: ${new Date().toISOString()}`);
-
-        // Track consecutive failures
-        failedPingsCount++;
-        successfulPingsCount = 0;
-
-        // Apply exponential backoff for repeated failures
-        if (failedPingsCount > 1 && currentPingDelay < MAX_PING_DELAY) {
-          const newDelay = Math.min(currentPingDelay * BACKOFF_FACTOR, MAX_PING_DELAY);
-          console.log(`Increasing ping interval from ${currentPingDelay}ms to ${newDelay}ms due to repeated failures`);
-          currentPingDelay = newDelay;
-
-          // Reconfigure the ping timer with longer interval
-          if (pingTimerRef) {
-            clearInterval(pingTimerRef);
-            pingTimerRef = setInterval(performPing, currentPingDelay);
-          }
-        }
-
-        // Attempt recovery if ping fails - without emitting any events that could crash the server
-        try {
-          console.log("Attempting server recovery...");
-
-          // Recovery strategy for timeouts:
-          // 1. Try to refresh connections if possible
-          if (typeof serverInstance.refreshConnections === 'function') {
-            await serverInstance.refreshConnections();
-          }
-
-          // 2. Check if server is still responsive through alternative means
-          if (typeof serverInstance.isRunning === 'function') {
-            try {
-              const isRunning = await serverInstance.isRunning();
-              if (!isRunning) {
-                console.log("Server appears to be down, will continue monitoring...");
-                // We don't restart here to avoid disrupting existing connections
-                // The next ping will attempt recovery again if needed
-              }
-            } catch (checkError) {
-              console.warn("Failed to check if server is running:", checkError);
-              // Don't propagate this error, just log it
-            }
-          }
-
-          // 3. For general non-timeout errors, perform a more general health check
-          if (typeof serverInstance.healthCheck === 'function') {
-            try {
-              await serverInstance.healthCheck({ repair: true });
-            } catch (healthCheckError) {
-              console.warn("Health check failed:", healthCheckError);
-              // Don't propagate this error, just log it
-            }
-          }
-        } catch (recoveryError) {
-          // IMPORTANT: Never emit any error events from here that could crash the container
-          console.error("Recovery attempt failed:", recoveryError);
-          // Log detailed error but continue execution, don't crash
-          console.debug("Recovery error details:", {
-            name: recoveryError instanceof Error ? recoveryError.name : 'Unknown',
-            message: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
-            stack: recoveryError instanceof Error && process.env.NODE_ENV === 'development'
-              ? recoveryError.stack
-              : undefined
-          });
-        }
-      }
-    } catch (finalError) {
-      // This is the last-resort catch - we should never reach this if our error handling is robust
-      console.error(`CRITICAL: Uncaught error in ping mechanism: ${
-        finalError instanceof Error ? finalError.message : String(finalError)
-      }`);
-
-      // Absolute last defense - log but don't let the error propagate up
-      console.debug("Error details:", {
-        name: finalError instanceof Error ? finalError.name : 'Unknown',
-        stack: finalError instanceof Error ? finalError.stack : undefined
-      });
-
-      // Don't emit any error events here!
-    }
-  };
-
-  // Start the ping interval with the initial delay
-  pingTimerRef = setInterval(performPing, currentPingDelay);
-
-  // Save reference to allow cleanup
-  return pingTimerRef;
-};
 // Function to set up timeout handling for requests
 const configureTimeouts = (serverInstance: any) => {
   try {
@@ -308,7 +122,6 @@ await initializePort();
 // Start the MCP server with enhanced error handling
 const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
   let retries = 0;
-  let pingTimer: NodeJS.Timeout | null = null;
 
   while (retries < maxRetries) {
     try {
@@ -456,8 +269,6 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
         }
       });
 
-      // Start ping mechanism with enhanced error handling
-      pingTimer = startPingMechanism(server);
 
       // Force the URL to use HTTP protocol to prevent client from defaulting to HTTPS
       const serverUrl = `http://localhost:${PORT}`;
@@ -504,7 +315,7 @@ const startWithRetry = async (maxRetries = 5, retryDelay = 5000) => {
     }
   }
 
-  return { server, pingTimer };
+  return { server };
 };
 
 // Start the server with retry logic
