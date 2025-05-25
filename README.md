@@ -309,6 +309,8 @@ The project uses the following environment variables that can be configured:
 - `HOST`: Host binding for HTTP server (default: 0.0.0.0)
 - `ENVIRONMENT`: Current environment (development/production)
 - `API_KEY`: API key required in the `x-api-key` header for all requests
+- `REQUEST_TIMEOUT`: Maximum request duration in milliseconds (default: 120000)
+- `PING_INTERVAL`: Interval between ping messages in milliseconds (default: 60000)
 
 In Cloudflare, these variables are configured in the `wrangler.toml` file:
 
