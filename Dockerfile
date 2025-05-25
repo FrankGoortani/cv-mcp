@@ -62,8 +62,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Define environment variables
 ENV NODE_ENV=production
 ENV PORT=3001
-ENV REQUEST_TIMEOUT=30000
-ENV PING_INTERVAL=30000
+ENV REQUEST_TIMEOUT=120000
+ENV PING_INTERVAL=60000
 
 # Define the command to run the application
 CMD ["bun", "run", "build/http-server.js"]
